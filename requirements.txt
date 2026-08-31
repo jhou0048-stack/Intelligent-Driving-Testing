@@ -1,0 +1,8 @@
+# CARLA's Python client version must match the installed simulator server.
+carla>=0.9.15
+opencv-python>=4.9
+pandas>=2.2
+pytest>=8.0
+PyYAML>=6.0
+ultralytics>=8.2
+

@@ -1,0 +1,14 @@
+project:
+  name: simulation-based-adas-testing
+
+paths:
+  data: data
+  logs: logs
+  reports: reports
+  scenarios: scenarios
+
+simulation:
+  host: "127.0.0.1"
+  port: 2000
+  timeout_seconds: 10.0
+
