@@ -1,63 +1,144 @@
 # Simulation-Based ADAS Testing & Validation Framework
 
-A portfolio project for building repeatable, simulation-based validation workflows for advanced driver-assistance systems (ADAS) and autonomous-driving systems.
+A portfolio project for building repeatable, simulation-based validation workflows for advanced driver-assistance systems (ADAS) and autonomous-driving systems using Gazebo Harmonic.
 
-This initial version contains only the project foundation. It does **not** implement vehicle-control, perception, planning, or other autonomous-driving behavior.
+## Features
 
-## Goals
+- **Lane Keeping Assist (LKA)** — OpenCV-based lane detection with proportional steering control
+- **Automatic Emergency Braking (AEB)** — Lidar/camera-based obstacle detection with emergency stop
+- **Integrated ADAS Pipeline** — Fused perception (camera + lidar + YOLO) driving LKA + AEB together
+- **Validation Framework** — Automated metric collection, pass/fail assertions, CSV/JSON reporting
+- **YAML Scenario Config** — Define and batch-run test scenarios from config files
+- **200+ Unit Tests** — Comprehensive coverage of all modules
 
-- Organize CARLA simulation scenarios and test infrastructure cleanly.
-- Keep simulation, perception, planning, control, and validation concerns independent.
-- Support repeatable PyTest-based validation and report generation.
-- Provide clear extension points for OpenCV, YOLO, and Pandas workflows.
+## Architecture
 
-## Project structure
+```text
+┌─────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Perception  │───▶│   Planning   │───▶│   Control    │
+│  Camera      │    │  LKA Pipeline│    │  Ackermann   │
+│  Lidar       │    │  AEB Pipeline│    │  Controller  │
+│  LaneDetect  │    │  ADAS Pipeline│   └──────┬───────┘
+│  YOLO        │    └──────────────┘           │
+│  Fusion      │                               ▼
+└──────┬───────┘                        ┌──────────────┐
+       │                                │  Simulation  │
+       └───────────────────────────────▶│  Gazebo      │
+                                        └──────────────┘
+       ┌──────────────┐
+       │   Testing    │  Scenarios, Assertions, Metrics,
+       │   Framework  │  Validators, Reports, Config Loader
+       └──────────────┘
+```
+
+## Project Structure
 
 ```text
 .
-├── config/             # Version-controlled configuration
-├── data/               # Local input/output datasets (ignored by Git)
-├── docs/               # Architecture and project documentation
-├── logs/               # Runtime logs (ignored by Git)
-├── reports/            # Generated test and analysis reports (ignored by Git)
-├── scenarios/          # Scenario definitions and supporting documentation
-├── scripts/            # Developer and automation entry points
+├── config/             # YAML configuration (default.yaml, scenarios.yaml)
+├── scenarios/
+│   ├── models/         # SDF models (ego_vehicle, obstacle_vehicle, pedestrian)
+│   └── worlds/         # SDF worlds (simple_road, follow, pedestrian, lane_change)
+├── scripts/            # Entry-point scripts (run_lka, run_aeb, run_adas, etc.)
 ├── src/
-│   ├── control/        # Vehicle-control domain package
-│   ├── perception/     # Computer-vision and detection domain package
-│   ├── planning/       # Route and behavior-planning domain package
-│   ├── simulation/     # CARLA integration and simulation lifecycle package
-│   └── testing/        # Shared validation, metrics, and test-support package
-└── tests/               # PyTest test suite
+│   ├── control/        # Vehicle control (Ackermann controller)
+│   ├── perception/     # Camera, Lidar, LaneDetector, YOLO, PerceptionPipeline
+│   ├── planning/       # LKA, AEB, ADAS pipelines, BehaviorPlanner
+│   ├── simulation/     # Gazebo Harmonic client
+│   └── testing/        # Assertions, Metrics, Validators, Reports, Config loader
+└── tests/              # PyTest suite (200+ tests)
 ```
-
-See [docs/architecture.md](docs/architecture.md) for the intended dependency boundaries.
 
 ## Prerequisites
 
-- Python 3.10 or later
-- A CARLA Simulator installation compatible with the Python client version in `requirements.txt`
-
-The CARLA server is installed separately. Its server and Python client versions should match.
+- Python 3.12+
+- [Gazebo Harmonic](https://gazebosim.org/docs/harmonic/install_osx) (macOS: `brew install gz-harmonic`)
+- OpenCV (`pip install opencv-python`)
 
 ## Setup
 
-Create and activate a virtual environment:
-
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python3.12 -m venv .venv312
+source .venv312/bin/activate
+pip install -r requirements.txt
+pip install -e .
 ```
 
-## Verify the scaffold
+> **macOS note:** Gazebo Python bindings come from Homebrew at `/opt/homebrew/lib/python3.12/site-packages`. A `.pth` file in the venv makes them available.
+
+## Quick Start
+
+### Run Tests
 
 ```bash
-pytest
+pytest tests/ -v
 ```
 
-## Current scope
+### Run LKA Pipeline
 
-Only the repository structure, package boundaries, configuration foundation, and a package-import smoke test are present. Scenario execution and ADAS algorithms will be added in later milestones.
+```bash
+# Terminal 1
+gz sim -s scenarios/worlds/simple_road.sdf
+# Terminal 2 (optional)
+gz sim -g
+# Terminal 3
+python scripts/run_lka.py --speed 0.5 --duration 10
+```
 
+### Run AEB Pipeline
+
+```bash
+gz sim -s scenarios/worlds/follow_scenario.sdf
+python scripts/run_aeb.py --speed 0.5 --duration 15
+```
+
+### Run Integrated ADAS
+
+```bash
+gz sim -s scenarios/worlds/follow_scenario.sdf
+python scripts/run_adas.py --speed 0.5 --duration 15 --output results.json
+```
+
+### Run LKA Validation Suite
+
+```bash
+gz sim -s scenarios/worlds/simple_road.sdf
+python scripts/validate_lka.py --output report.csv --json summary.json
+```
+
+### Batch Run Scenarios
+
+```bash
+python scripts/run_scenarios.py --config config/scenarios.yaml --dry-run
+```
+
+## Modules
+
+| Package | Key Classes |
+|---------|-------------|
+| `simulation` | `Simulator` ABC, `GazeboSimulator` |
+| `control` | `VehicleController` ABC, `GazeboAckermannController` |
+| `perception` | `Camera`, `Lidar`, `LaneDetector`, `ObjectDetector`, `PerceptionPipeline` |
+| `planning` | `LaneKeeper`, `AEBController`, `LKAPipeline`, `AEBPipeline`, `ADASPipeline` |
+| `testing` | `ScenarioRunner`, `LKAValidator`, `AEBValidator`, `MetricCollector`, `TestReport`, `ResultAnalyzer` |
+
+## Testing
+
+The project includes 200+ unit tests covering all modules:
+
+```bash
+# Run all tests with verbose output
+PYTHONPATH=src python -m pytest tests/ -v
+
+# Run specific test file
+PYTHONPATH=src python -m pytest tests/test_aeb.py -v
+
+# Run with coverage
+PYTHONPATH=src python -m pytest tests/ --cov=src --cov-report=term-missing
+```
+
+## macOS Notes
+
+- `gz sim` requires separate terminals for server (`gz sim -s`) and GUI (`gz sim -g`)
+- Gazebo starts paused; scripts send `WorldControl{pause: false}` automatically
+- `gpu_lidar` requires Metal/ogre2; falls back to CPU `lidar` if unavailable

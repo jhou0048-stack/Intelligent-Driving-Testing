@@ -8,7 +8,43 @@ paths:
   scenarios: scenarios
 
 simulation:
-  host: "127.0.0.1"
-  port: 2000
-  timeout_seconds: 10.0
+  simulator: gazebo
+  world: simple_road
+  server_address: "127.0.0.1"
+  transport_timeout_seconds: 10.0
 
+perception:
+  camera:
+    enabled: true
+    width: 640
+    height: 480
+    update_rate: 30
+    link_name: camera_link
+    sensor_name: front_camera
+  lidar:
+    enabled: true
+    update_rate: 10
+    link_name: lidar_link
+    sensor_name: front_lidar
+    max_range: 50.0
+  object_detection:
+    model: yolov8n.pt
+    confidence_threshold: 0.5
+
+testing:
+  headless: true
+  scenario_timeout: 60.0
+  report_format: csv
+  report_dir: reports
+
+planning:
+  lane_keeper:
+    lane_width: 3.0
+    lookahead_distance: 5.0
+    kp: 1.0
+  behavior:
+    emergency_stop_distance: 5.0
+
+vehicle:
+  model_name: ego_vehicle
+  world_name: simple_road

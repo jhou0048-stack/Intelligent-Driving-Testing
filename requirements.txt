@@ -1,7 +1,10 @@
-# CARLA's Python client version must match the installed simulator server.
-carla>=0.9.15
+# Gazebo Harmonic Python bindings are provided by the Homebrew `gz-harmonic`
+# installation under `/opt/homebrew/lib/python3.12/site-packages`. They are
+# made available to this venv via a `.pth` file, not through pip.
+
 opencv-python>=4.9
 pandas>=2.2
+protobuf>=4.0
 pytest>=8.0
 PyYAML>=6.0
 ultralytics>=8.2

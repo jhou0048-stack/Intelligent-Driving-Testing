@@ -7,7 +7,7 @@ name = "simulation-based-adas-testing"
 version = "0.1.0"
 description = "A simulation-based ADAS testing and validation framework."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dynamic = ["dependencies"]
 
 [tool.setuptools.dynamic]
