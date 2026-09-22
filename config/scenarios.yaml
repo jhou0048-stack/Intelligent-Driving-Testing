@@ -1,0 +1,63 @@
+scenarios:
+  - name: lka_straight_road
+    world: simple_road
+    model: ego_vehicle
+    timeout: 30.0
+    actions:
+      - type: drive
+        params:
+          speed: 0.5
+          steering_angle: 0.0
+        duration: 10.0
+      - type: stop
+        duration: 1.0
+    pass_conditions:
+      - type: max_lateral_deviation
+        max_deviation: 0.5
+
+  - name: aeb_obstacle_ahead
+    world: follow_scenario
+    model: ego_vehicle
+    timeout: 30.0
+    actions:
+      - type: drive
+        params:
+          speed: 0.5
+          steering_angle: 0.0
+        duration: 15.0
+      - type: stop
+        duration: 1.0
+    pass_conditions:
+      - type: no_collision
+
+  - name: aeb_pedestrian_crossing
+    world: pedestrian_crossing
+    model: ego_vehicle
+    timeout: 30.0
+    actions:
+      - type: drive
+        params:
+          speed: 0.5
+          steering_angle: 0.0
+        duration: 15.0
+      - type: stop
+        duration: 1.0
+    pass_conditions:
+      - type: no_collision
+      - type: max_lateral_deviation
+        max_deviation: 1.0
+
+  - name: lane_change_obstacle
+    world: lane_change
+    model: ego_vehicle
+    timeout: 45.0
+    actions:
+      - type: drive
+        params:
+          speed: 0.5
+          steering_angle: 0.0
+        duration: 20.0
+      - type: stop
+        duration: 1.0
+    pass_conditions:
+      - type: no_collision
