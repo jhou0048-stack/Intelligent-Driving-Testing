@@ -1,30 +1,89 @@
 # Architecture
 
-The framework uses a `src` layout with packages divided by responsibility. This keeps simulator integration separate from algorithms and validation logic, so components can be tested or replaced independently.
+The framework separates simulator integration, ADAS logic, and validation so
+each layer can be tested independently.
 
 ## Package boundaries
 
-- `simulation`: Gazebo client adapters, world lifecycle, actors, sensors, and simulation timing.
-- `perception`: image preprocessing, detection adapters, and normalized perception outputs.
-- `planning`: route and behavior-planning interfaces and implementations.
-- `control`: vehicle-command interfaces and control implementations.
-- `testing`: scenario orchestration, measurements, assertions, metrics, and report preparation.
+- `simulation`: simulator interfaces, Gazebo transport, topic discovery, service
+  calls, publisher discovery, and vehicle telemetry.
+- `perception`: camera and lidar adapters, OpenCV lane detection, YOLO adapter,
+  and fused perception results.
+- `planning`: LKA, AEB, behavior, and integrated command-arbitration pipelines.
+- `control`: simulator-independent vehicle control and Gazebo Ackermann commands.
+- `testing`: scenario loading, closed-loop runtime setup, fault injection,
+  assertions, result reporting, offline perception validation, and regression.
 
-These packages are intentionally minimal in the current milestone. Future code should avoid connecting to Gazebo or loading models at import time.
+Gazebo connections and model loading occur only at runtime. Importing a package
+does not start the simulator or load YOLO weights.
 
-## Dependency direction
+## Scenario lifecycle
 
-Domain packages should exchange small typed data structures rather than importing Gazebo objects throughout the codebase. Simulator-specific types should remain at the `simulation` boundary.
+```text
+load YAML
+   │
+   ▼
+start Gazebo server and optional GUI
+   │
+   ▼
+connect transport and wait for command subscriber
+   │
+   ▼
+subscribe odometry, contacts, camera, and/or lidar
+   │
+   ▼
+unpause world and verify sensor readiness
+   │
+   ▼
+run open-loop actions or lka/aeb/adas closed loop
+   │
+   ▼
+stop vehicle and collect final metrics
+   │
+   ▼
+evaluate every pass condition
+   │
+   ▼
+write CSV/JSON and return a process exit status
+   │
+   ▼
+disconnect resources and terminate Gazebo
+```
 
-Tests may import all domain packages. Production packages must not import from `tests/`.
+Each scenario receives a new Gazebo process. State is therefore isolated between
+tests and teardown runs even after failures.
 
-## Runtime content
+## Command arbitration
 
-- `config/` contains safe, version-controlled defaults.
-- `scenarios/` contains declarative scenario definitions.
-- `data/` contains local datasets and captures.
-- `logs/` contains runtime diagnostics.
-- `reports/` contains generated validation output.
+The integrated `ADASPipeline` owns the final vehicle command. Emergency braking
+has priority over lane keeping; AEB and LKA do not publish competing commands
+from separate threads.
 
-The last three directories retain placeholders in Git, while their runtime contents remain ignored.
+```text
+perception result
+      │
+      ├── hazard inside braking distance ──> stop
+      │
+      └── safe ──> LKA steering or straight cruise
+```
 
+## Validation data
+
+`GazeboVehicleTelemetry` subscribes to real simulator topics and reports:
+
+- final and maximum speed
+- mean speed and distance travelled
+- final position and maximum lateral deviation
+- odometry/contact sample counts
+- collision-event count
+
+The closed-loop runtime adds perception cycles, lane-detection rate, minimum
+forward distance, AEB activation, YOLO object counts, and fault activations.
+
+Assertions fail when required metrics are missing. Missing telemetry is never
+interpreted as a successful zero-collision or zero-deviation result.
+
+## Generated content
+
+`data/`, `logs/`, `reports/`, and model weights remain local. Configuration,
+source, SDF assets, tests, and regression limits are version controlled.

@@ -1,7 +1,6 @@
 """Tests for LKA validation framework: metrics, validator, and suite."""
 
 import math
-from unittest.mock import MagicMock
 
 import pytest
 

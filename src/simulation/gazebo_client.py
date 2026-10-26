@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -152,15 +153,39 @@ class GazeboSimulator(Simulator):
     def publish(self, topic: str, msg_type: str, message: Any) -> None:
         """Publish ``message`` on ``topic`` as ``msg_type``."""
         self._ensure_connected()
-        msg_cls = _resolve_msg_type(msg_type)
-
-        publisher = self._publishers.get(topic)
-        if publisher is None:
-            publisher = self._node.advertise(topic, msg_cls)
-            self._publishers[topic] = publisher
-
+        publisher = self._get_or_create_publisher(topic, msg_type)
         publisher.publish(message)
         logger.debug("Published to %s", topic)
+
+    def wait_for_subscriber(
+        self,
+        topic: str,
+        msg_type: str,
+        timeout: float = 2.0,
+    ) -> bool:
+        """Advertise a topic and wait for a remote subscriber to discover it."""
+        self._ensure_connected()
+        publisher = self._get_or_create_publisher(topic, msg_type)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if publisher.has_connections():
+                return True
+            time.sleep(0.02)
+        return publisher.has_connections()
+
+    def has_topic_publisher(self, topic: str) -> bool:
+        """Return whether Gazebo currently advertises ``topic``."""
+        self._ensure_connected()
+        publishers, _subscribers = self._node.topic_info(topic)
+        return bool(publishers)
+
+    def _get_or_create_publisher(self, topic: str, msg_type: str) -> Any:
+        publisher = self._publishers.get(topic)
+        if publisher is None:
+            msg_cls = _resolve_msg_type(msg_type)
+            publisher = self._node.advertise(topic, msg_cls)
+            self._publishers[topic] = publisher
+        return publisher
 
     def request(
         self,

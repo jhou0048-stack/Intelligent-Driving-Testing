@@ -1,11 +1,17 @@
 """Tests for the simulator-agnostic vehicle-control interface."""
 
+import importlib.util
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from control import GazeboAckermannController, VehicleController
 from simulation import GazeboSimulator
+
+requires_gazebo_bindings = pytest.mark.skipif(
+    importlib.util.find_spec("gz") is None,
+    reason="Gazebo Python bindings are not installed",
+)
 
 
 def test_vehicle_controller_is_abstract() -> None:
@@ -49,9 +55,18 @@ def test_gazebo_controller_can_use_external_simulator() -> None:
 def test_gazebo_controller_connect_owns_simulator() -> None:
     """connect() opens the injected simulator only when owned."""
     controller = GazeboAckermannController(model_name="ego_vehicle")
-    with patch.object(controller._simulator, "connect") as mock_connect:
+    with patch.object(
+        controller._simulator, "connect"
+    ) as mock_connect, patch.object(
+        controller._simulator,
+        "wait_for_subscriber",
+        return_value=True,
+    ) as mock_wait:
         controller.connect()
     mock_connect.assert_called_once()
+    mock_wait.assert_called_once_with(
+        "/model/ego_vehicle/cmd_vel", "Twist", timeout=2.0
+    )
 
 
 def test_gazebo_controller_connect_does_not_touch_external_simulator() -> None:
@@ -62,6 +77,18 @@ def test_gazebo_controller_connect_does_not_touch_external_simulator() -> None:
     )
     controller.connect()
     sim.connect.assert_not_called()
+    sim.wait_for_subscriber.assert_called_once()
+
+
+def test_gazebo_controller_connect_requires_command_subscriber() -> None:
+    sim = MagicMock()
+    sim.wait_for_subscriber.return_value = False
+    controller = GazeboAckermannController(
+        model_name="ego_vehicle", simulator=sim, own_simulator=False
+    )
+
+    with pytest.raises(RuntimeError, match="No Gazebo subscriber"):
+        controller.connect()
 
 
 def test_gazebo_controller_disconnect_owns_simulator() -> None:
@@ -93,6 +120,7 @@ def test_gazebo_controller_is_connected_delegates() -> None:
     sim.is_connected.assert_called_once()
 
 
+@requires_gazebo_bindings
 def test_gazebo_controller_send_command_publishes_twist() -> None:
     """send_command() publishes a Twist with linear.x and angular.z set."""
     sim = MagicMock()
@@ -109,6 +137,7 @@ def test_gazebo_controller_send_command_publishes_twist() -> None:
     assert msg.angular.z == pytest.approx(0.3)
 
 
+@requires_gazebo_bindings
 def test_gazebo_controller_stop_publishes_zero_command() -> None:
     """stop() publishes a zero-speed, zero-steering command."""
     sim = MagicMock()

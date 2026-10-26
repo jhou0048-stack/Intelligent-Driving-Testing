@@ -2,62 +2,108 @@ scenarios:
   - name: lka_straight_road
     world: simple_road
     model: ego_vehicle
-    timeout: 30.0
-    actions:
-      - type: drive
-        params:
-          speed: 0.5
-          steering_angle: 0.0
-        duration: 10.0
-      - type: stop
-        duration: 1.0
+    timeout: 20.0
+    telemetry:
+      lane_center_y: 0.0
+    sut:
+      mode: lka
+      duration: 8.0
+      speed: 0.5
+      loop_hz: 10.0
     pass_conditions:
       - type: max_lateral_deviation
         max_deviation: 0.5
+      - type: minimum_distance_traveled
+        min_distance: 3.0
+      - type: minimum_perception_steps
+        min_steps: 40
+      - type: no_collision
 
   - name: aeb_obstacle_ahead
     world: follow_scenario
     model: ego_vehicle
-    timeout: 30.0
-    actions:
-      - type: drive
-        params:
-          speed: 0.5
-          steering_angle: 0.0
-        duration: 15.0
-      - type: stop
-        duration: 1.0
+    timeout: 25.0
+    telemetry:
+      # Ackermann odometry is relative to the vehicle's initial pose.
+      lane_center_y: 0.0
+    sut:
+      mode: aeb
+      duration: 12.0
+      speed: 2.0
+      loop_hz: 20.0
     pass_conditions:
       - type: no_collision
+      - type: aeb_triggered
+      - type: minimum_distance_traveled
+        min_distance: 10.0
+      - type: minimum_perception_steps
+        min_steps: 100
+      - type: final_speed_below
+        max_speed: 0.2
 
   - name: aeb_pedestrian_crossing
     world: pedestrian_crossing
     model: ego_vehicle
+    timeout: 25.0
+    telemetry:
+      lane_center_y: 0.0
+    sut:
+      mode: aeb
+      duration: 10.0
+      speed: 2.0
+      loop_hz: 20.0
+    pass_conditions:
+      - type: no_collision
+      - type: aeb_triggered
+      - type: minimum_distance_traveled
+        min_distance: 7.0
+      - type: minimum_perception_steps
+        min_steps: 80
+      - type: final_speed_below
+        max_speed: 0.2
+
+  - name: integrated_adas_obstacle_stop
+    world: lane_change
+    model: ego_vehicle
     timeout: 30.0
-    actions:
-      - type: drive
-        params:
-          speed: 0.5
-          steering_angle: 0.0
-        duration: 15.0
-      - type: stop
-        duration: 1.0
+    telemetry:
+      lane_center_y: 0.0
+    sut:
+      mode: adas
+      duration: 15.0
+      speed: 2.0
+      loop_hz: 15.0
+    pass_conditions:
+      - type: no_collision
+      - type: aeb_triggered
+      - type: max_lateral_deviation
+        max_deviation: 0.75
+      - type: minimum_perception_steps
+        min_steps: 100
+
+  - name: lka_camera_dropout_degraded_mode
+    world: simple_road
+    model: ego_vehicle
+    timeout: 20.0
+    telemetry:
+      lane_center_y: 0.0
+    sut:
+      mode: lka
+      duration: 8.0
+      speed: 0.5
+      loop_hz: 10.0
+      faults:
+        - target: camera
+          type: dropout
+          start_time: 3.0
+          duration: 2.0
     pass_conditions:
       - type: no_collision
       - type: max_lateral_deviation
-        max_deviation: 1.0
-
-  - name: lane_change_obstacle
-    world: lane_change
-    model: ego_vehicle
-    timeout: 45.0
-    actions:
-      - type: drive
-        params:
-          speed: 0.5
-          steering_angle: 0.0
-        duration: 20.0
-      - type: stop
-        duration: 1.0
-    pass_conditions:
-      - type: no_collision
+        max_deviation: 0.5
+      - type: minimum_distance_traveled
+        min_distance: 3.0
+      - type: minimum_perception_steps
+        min_steps: 40
+      - type: minimum_fault_activations
+        min_activations: 10

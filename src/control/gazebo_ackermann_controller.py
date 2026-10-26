@@ -6,8 +6,6 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-import gz.msgs10.twist_pb2 as twist_pb
-
 from control.vehicle_controller import VehicleController
 from simulation import GazeboSimulator
 
@@ -48,9 +46,17 @@ class GazeboAckermannController(VehicleController):
         self._odom_topic = _odometry_topic(model_name)
 
     def connect(self) -> None:
-        """Connect the underlying simulator if we own it."""
+        """Connect and wait until Gazebo discovers the command publisher."""
         if self._own_simulator:
             self._simulator.connect()
+        if not self._simulator.wait_for_subscriber(
+            self._cmd_topic,
+            "Twist",
+            timeout=2.0,
+        ):
+            raise RuntimeError(
+                f"No Gazebo subscriber discovered on {self._cmd_topic}"
+            )
         logger.info(
             "Ackermann controller ready for model '%s' on %s",
             self._model_name,
@@ -69,6 +75,8 @@ class GazeboAckermannController(VehicleController):
 
     def send_command(self, speed: float, steering_angle: float) -> None:
         """Publish a speed and steering command to the vehicle."""
+        import gz.msgs10.twist_pb2 as twist_pb
+
         msg = twist_pb.Twist()
         msg.linear.x = float(speed)
         msg.angular.z = float(steering_angle)

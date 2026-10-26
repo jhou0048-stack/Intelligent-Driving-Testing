@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
+from pathlib import Path
 
 import gz.msgs10.world_control_pb2 as wc_pb
 
@@ -19,6 +21,7 @@ from control import GazeboAckermannController
 from perception.camera import GazeboCamera
 from perception.lane_detector import LaneDetector
 from perception.lidar import GazeboLidar
+from perception.object_detector import YOLODetector
 from perception.perception_pipeline import PerceptionPipeline
 from planning.adas_pipeline import ADASPipeline
 from planning.aeb_controller import AEBController
@@ -33,6 +36,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=15.0)
     parser.add_argument("--speed", type=float, default=0.5)
     parser.add_argument("--output", default=None, help="JSON output path")
+    parser.add_argument(
+        "--yolo-model",
+        default=None,
+        help="Optional YOLO weights path; enables object detection",
+    )
+    parser.add_argument("--yolo-confidence", type=float, default=0.5)
     return parser.parse_args()
 
 
@@ -67,10 +76,18 @@ def main() -> None:
     )
     lidar.connect()
 
+    object_detector = None
+    if args.yolo_model:
+        object_detector = YOLODetector(
+            model_path=args.yolo_model,
+            confidence_threshold=args.yolo_confidence,
+        )
+
     perception = PerceptionPipeline(
         camera=camera,
         lidar=lidar,
         lane_detector=LaneDetector(),
+        object_detector=object_detector,
     )
 
     pipeline = ADASPipeline(
@@ -88,7 +105,11 @@ def main() -> None:
         step_log.append({
             "timestamp": result.timestamp,
             "lateral_offset": result.lateral_offset,
-            "min_forward_distance": result.min_forward_distance,
+            "min_forward_distance": (
+                result.min_forward_distance
+                if math.isfinite(result.min_forward_distance)
+                else None
+            ),
             "objects": len(result.objects),
             "aeb_active": pipeline.is_aeb_active,
         })
@@ -105,14 +126,16 @@ def main() -> None:
     time.sleep(args.duration)
     pipeline.stop()
 
-    print(f"\n[ADAS] === Results ===")
+    print("\n[ADAS] === Results ===")
     print(f"  Steps: {pipeline.step_count}")
     print(f"  AEB active at end: {pipeline.is_aeb_active}")
     aeb_steps = sum(1 for s in step_log if s.get("aeb_active"))
     print(f"  AEB active steps: {aeb_steps}/{len(step_log)}")
 
     if args.output:
-        with open(args.output, "w") as f:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w") as f:
             json.dump({"steps": step_log, "total": pipeline.step_count}, f, indent=2)
         print(f"  Log written to {args.output}")
 

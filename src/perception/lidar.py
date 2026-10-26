@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import threading
 from abc import abstractmethod
 from typing import Any

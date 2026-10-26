@@ -1,6 +1,5 @@
 """Tests for the integrated perception pipeline and ADAS pipeline."""
 
-import math
 from unittest.mock import MagicMock
 
 import numpy as np

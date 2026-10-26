@@ -1,30 +1,26 @@
-# Scripts
+# Command-line tools
 
-This directory contains developer and automation entry points. Reusable logic belongs in the appropriate package under `src/`; scripts only coordinate that logic.
-
-## Available scripts
+Reusable behavior belongs under `src/`; these scripts only parse arguments and
+coordinate framework components.
 
 | Script | Description |
-|--------|-------------|
-| `verify_gazebo_communication.py` | Check that Python can list Gazebo topics and echo messages |
-| `control_vehicle.py` | Manual smoke test for Ackermann vehicle control in Gazebo |
-| `run_lka.py` | Run the LKA (Lane Keeping Assist) pipeline end-to-end |
-| `validate_lka.py` | Run the LKA validation suite with metrics and CSV/JSON report |
-| `run_aeb.py` | Run the AEB (Automatic Emergency Braking) pipeline with lidar |
-| `run_adas.py` | Run the integrated ADAS pipeline (LKA + AEB + perception fusion) |
-| `run_scenarios.py` | Batch-run all scenarios from a YAML config file |
+|---|---|
+| `run_scenarios.py` | Start Gazebo per scenario, execute YAML suites, assert, report |
+| `check_regression.py` | Compare scenario JSON against regression limits |
+| `validate_yolo.py` | Evaluate YOLO against a labelled image manifest |
+| `run_lka.py` | Interactive LKA demonstration against a running world |
+| `run_aeb.py` | Integrated LKA+AEB demonstration with safe command arbitration |
+| `run_adas.py` | Integrated ADAS demonstration with optional YOLO |
+| `validate_lka.py` | Run the isolated LKA and camera-fault scenario subset |
+| `validate_aeb.py` | Run the vehicle, pedestrian, and integrated AEB subset |
+| `control_vehicle.py` | Manual Ackermann control smoke test |
+| `verify_gazebo_communication.py` | Gazebo transport connectivity check |
 
-## Prerequisites
-
-All scripts require a running Gazebo Harmonic simulation:
+`run_scenarios.py` manages the Gazebo server automatically. Demonstration
+scripts expect a world to already be running, for example:
 
 ```bash
-# Terminal 1: Start the Gazebo server
-gz sim -s scenarios/worlds/simple_road.sdf
-
-# Terminal 2 (optional): Start the GUI
-gz sim -g
-
-# Terminal 3: Run a script
-python scripts/run_lka.py
+GZ_SIM_RESOURCE_PATH="$PWD/scenarios/models" \
+  gz sim -s -r scenarios/worlds/follow_scenario.sdf
+python scripts/run_adas.py --duration 15
 ```
