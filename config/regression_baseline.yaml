@@ -1,0 +1,48 @@
+scenarios:
+  lka_straight_road:
+    required_pass: true
+    metrics:
+      distance_traveled:
+        min: 3.0
+      max_lateral_deviation:
+        max: 0.5
+      lane_detection_rate:
+        min: 0.7
+
+  aeb_obstacle_ahead:
+    required_pass: true
+    metrics:
+      collision_count:
+        equals: 0
+      aeb_triggered:
+        equals: true
+      min_forward_distance:
+        min: 0.5
+
+  aeb_pedestrian_crossing:
+    required_pass: true
+    metrics:
+      collision_count:
+        equals: 0
+      aeb_triggered:
+        equals: true
+
+  integrated_adas_obstacle_stop:
+    required_pass: true
+    metrics:
+      collision_count:
+        equals: 0
+      aeb_triggered:
+        equals: true
+      max_lateral_deviation:
+        max: 0.75
+
+  lka_camera_dropout_degraded_mode:
+    required_pass: true
+    metrics:
+      collision_count:
+        equals: 0
+      fault_injection_count:
+        min: 10
+      max_lateral_deviation:
+        max: 0.5

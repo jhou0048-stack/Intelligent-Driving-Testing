@@ -99,10 +99,93 @@ def test_build_assertions_position_within() -> None:
     assert isinstance(result[0], PositionWithinAssertion)
 
 
-def test_build_assertions_unknown_type_skipped() -> None:
+def test_build_assertions_unknown_type_rejected() -> None:
     conditions = [{"type": "unknown_thing"}]
-    result = build_assertions(conditions)
-    assert result == []
+    with pytest.raises(ValueError, match="Unknown assertion type"):
+        build_assertions(conditions)
+
+
+def test_build_scenario_with_telemetry() -> None:
+    data = {
+        "name": "telemetry_test",
+        "world": "simple_road",
+        "telemetry": {
+            "lane_center_y": -1.5,
+            "sample_interval": 0.1,
+            "startup_timeout": 2.0,
+        },
+    }
+    scenario = build_scenario(data)
+    assert scenario.telemetry.lane_center_y == pytest.approx(-1.5)
+    assert scenario.telemetry.sample_interval == pytest.approx(0.1)
+    assert scenario.telemetry.startup_timeout == pytest.approx(2.0)
+
+
+def test_build_scenario_with_closed_loop_sut() -> None:
+    scenario = build_scenario({
+        "name": "aeb_test",
+        "world": "follow_scenario",
+        "sut": {
+            "mode": "aeb",
+            "duration": 12.0,
+            "speed": 2.0,
+            "loop_hz": 20.0,
+        },
+    })
+    assert scenario.sut.mode == "aeb"
+    assert scenario.sut.duration == pytest.approx(12.0)
+    assert scenario.sut.speed == pytest.approx(2.0)
+
+
+def test_build_scenario_preserves_fault_configuration() -> None:
+    scenario = build_scenario({
+        "name": "fault_test",
+        "world": "simple_road",
+        "sut": {
+            "mode": "lka",
+            "duration": 2.0,
+            "faults": [
+                {
+                    "target": "camera",
+                    "type": "dropout",
+                    "start_time": 0.5,
+                    "duration": 0.5,
+                }
+            ],
+        },
+    })
+    assert scenario.sut.faults[0]["type"] == "dropout"
+
+
+def test_build_scenario_rejects_invalid_fault() -> None:
+    with pytest.raises(ValueError, match="Unsupported camera fault"):
+        build_scenario({
+            "name": "bad_fault",
+            "world": "simple_road",
+            "sut": {
+                "mode": "lka",
+                "duration": 2.0,
+                "faults": [{"target": "camera", "type": "corruption"}],
+            },
+        })
+
+
+def test_build_scenario_rejects_unknown_sut_mode() -> None:
+    with pytest.raises(ValueError, match="Unknown SUT mode"):
+        build_scenario({
+            "name": "bad",
+            "world": "simple_road",
+            "sut": {"mode": "unknown", "duration": 1.0},
+        })
+
+
+def test_build_scenario_rejects_zero_closed_loop_duration() -> None:
+    with pytest.raises(ValueError, match="duration"):
+        build_scenario({
+            "name": "bad",
+            "world": "simple_road",
+            "sut": {"mode": "lka", "duration": 0.0},
+        })
 
 
 def test_build_assertions_multiple() -> None:

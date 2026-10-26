@@ -6,6 +6,7 @@ opencv-python>=4.9
 pandas>=2.2
 protobuf>=4.0
 pytest>=8.0
+pytest-cov>=5.0
 PyYAML>=6.0
 ultralytics>=8.2
 

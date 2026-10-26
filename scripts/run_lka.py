@@ -44,7 +44,7 @@ def main() -> None:
 
     sim = GazeboSimulator()
     sim.connect()
-    print(f"[LKA] Connected to Gazebo transport")
+    print("[LKA] Connected to Gazebo transport")
 
     # Unpause the simulation
     req = wc_pb.WorldControl()
@@ -56,7 +56,7 @@ def main() -> None:
     if resp is True or (hasattr(resp, "data") and resp.data):
         print(f"[LKA] World '{args.world}' unpaused")
     else:
-        print(f"[LKA] Warning: could not unpause world")
+        print("[LKA] Warning: could not unpause world")
 
     controller = GazeboAckermannController(
         model_name=args.model, simulator=sim, own_simulator=False,
@@ -105,7 +105,7 @@ def main() -> None:
     time.sleep(args.duration)
     pipeline.stop()
 
-    print(f"\n[LKA] === Results ===")
+    print("\n[LKA] === Results ===")
     print(f"  Steps executed: {pipeline.step_count}")
     det = pipeline.last_detection
     if det:

@@ -297,7 +297,6 @@ def test_yolo_detector_returns_detections() -> None:
     mock_result.names = {2: "car"}
 
     with patch.dict("sys.modules", {"ultralytics": MagicMock()}):
-        import importlib
         import perception.object_detector as od_mod
 
         mock_yolo_cls = MagicMock()

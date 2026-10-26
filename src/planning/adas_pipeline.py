@@ -32,6 +32,8 @@ class ADASPipeline:
         aeb_controller: AEBController | None = None,
         default_speed: float = 0.5,
         loop_hz: float = 10.0,
+        enable_lka: bool = True,
+        enable_aeb: bool = True,
     ) -> None:
         self._controller = controller
         self._perception = perception
@@ -39,6 +41,8 @@ class ADASPipeline:
         self._aeb = aeb_controller or AEBController()
         self._default_speed = default_speed
         self._loop_period = 1.0 / loop_hz
+        self._enable_lka = enable_lka
+        self._enable_aeb = enable_aeb
         self._running = False
         self._thread: threading.Thread | None = None
         self._pose: dict[str, float] = {"x": 0.0, "y": 0.0, "heading": 0.0}
@@ -69,6 +73,7 @@ class ADASPipeline:
             return
         self._running = True
         self._step_count = 0
+        self._aeb_active = False
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -96,21 +101,29 @@ class ADASPipeline:
         self._step_count += 1
 
         # AEB check
-        if result.min_forward_distance < self._aeb.compute_braking_distance(
-            self._default_speed
+        if (
+            self._enable_aeb
+            and result.min_forward_distance
+            < self._aeb.compute_braking_distance(self._default_speed)
         ):
             self._aeb_active = True
             self._controller.stop()
         else:
             self._aeb_active = False
-            perception_data = {"lateral_offset": result.lateral_offset}
-            waypoints = self._lane_keeper.plan(self._pose, perception_data)
-            if waypoints:
-                speed, steering = self._lane_keeper.compute_steering(
-                    self._pose, waypoints[0]
-                )
+            if self._enable_lka:
+                perception_data = {"lateral_offset": result.lateral_offset}
+                waypoints = self._lane_keeper.plan(self._pose, perception_data)
+                if waypoints:
+                    speed, steering = self._lane_keeper.compute_steering(
+                        self._pose, waypoints[0]
+                    )
+                    self._controller.send_command(
+                        speed=speed, steering_angle=steering
+                    )
+            else:
                 self._controller.send_command(
-                    speed=speed, steering_angle=steering
+                    speed=self._default_speed,
+                    steering_angle=0.0,
                 )
 
         for cb in self._callbacks:

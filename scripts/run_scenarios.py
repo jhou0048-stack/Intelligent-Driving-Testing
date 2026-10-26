@@ -9,21 +9,28 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
+import time
 
 from testing.config_loader import build_assertions, load_scenario_suite
-from testing.report import TestReport
+from testing.report import ScenarioResult, TestReport
+from testing.runner import GazeboScenarioRunner
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Batch scenario runner")
     parser.add_argument("--config", default="config/scenarios.yaml",
                         help="YAML scenario config file")
-    parser.add_argument("--output", default="scenario_results.csv",
+    parser.add_argument("--output", default="reports/scenario_results.csv",
                         help="CSV output path")
-    parser.add_argument("--json", default=None,
-                        help="Optional JSON summary output")
+    parser.add_argument("--json", default="reports/scenario_results.json",
+                        help="JSON result output path")
+    parser.add_argument("--scenarios-dir", default="scenarios",
+                        help="Directory containing worlds and models")
+    parser.add_argument("--show-gui", action="store_true",
+                        help="Launch the Gazebo GUI while scenarios run")
+    parser.add_argument("--scenario", action="append", default=[],
+                        help="Run only a named scenario (repeatable)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Parse and validate scenarios without running")
     return parser.parse_args()
@@ -32,6 +39,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     scenarios = load_scenario_suite(args.config)
+    if args.scenario:
+        requested = set(args.scenario)
+        scenarios = [sc for sc in scenarios if sc.name in requested]
+        found = {sc.name for sc in scenarios}
+        missing = requested - found
+        if missing:
+            print(f"[BATCH] Unknown scenario(s): {', '.join(sorted(missing))}")
+            sys.exit(2)
     report = TestReport()
 
     print(f"[BATCH] Loaded {len(scenarios)} scenarios from {args.config}")
@@ -47,26 +62,38 @@ def main() -> None:
         print("[BATCH] Dry run complete — all scenarios parsed successfully")
         return
 
-    print("\n[BATCH] Note: Full execution requires a running Gazebo instance.")
-    print("[BATCH] Use 'gz sim -s scenarios/worlds/<world>.sdf' to start.")
-    print(f"[BATCH] Scenarios validated. Output would go to: {args.output}")
+    for sc in scenarios:
+        print(f"\n[BATCH] Running {sc.name} ...")
+        started_at = time.monotonic()
+        try:
+            with GazeboScenarioRunner(
+                scenarios_dir=args.scenarios_dir,
+                headless=not args.show_gui,
+            ) as runner:
+                runner.load_scenario(sc)
+                result = runner.execute()
+        except Exception as exc:
+            result = ScenarioResult(
+                scenario_name=sc.name,
+                passed=False,
+                duration=time.monotonic() - started_at,
+                error=str(exc),
+            )
 
+        report.add_result(result)
+        status = "PASS" if result.passed else "FAIL"
+        print(f"[BATCH] {status} {sc.name} ({result.duration:.2f}s)")
+        if result.error:
+            print(f"        {result.error}")
+
+    report.to_csv(args.output)
+    print(f"\n[BATCH] CSV report written to {args.output}")
     if args.json:
-        summary = {
-            "total": len(scenarios),
-            "scenarios": [
-                {
-                    "name": sc.name,
-                    "world": sc.world,
-                    "actions": len(sc.actions),
-                    "conditions": len(sc.pass_conditions),
-                }
-                for sc in scenarios
-            ],
-        }
-        with open(args.json, "w") as f:
-            json.dump(summary, f, indent=2)
-        print(f"[BATCH] Scenario summary written to {args.json}")
+        report.to_json(args.json)
+        print(f"[BATCH] JSON report written to {args.json}")
+    print(f"[BATCH] {report.summary()}")
+    if not report.all_passed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

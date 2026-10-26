@@ -18,10 +18,10 @@ from control import GazeboAckermannController
 from perception.camera import GazeboCamera
 from perception.lane_detector import LaneDetector
 from perception.lidar import GazeboLidar
+from perception.perception_pipeline import PerceptionPipeline
+from planning.adas_pipeline import ADASPipeline
 from planning.aeb_controller import AEBController
-from planning.aeb_pipeline import AEBPipeline
 from planning.lane_keeper import LaneKeeper
-from planning.lka_pipeline import LKAPipeline
 from simulation import GazeboSimulator
 
 
@@ -66,22 +66,34 @@ def main() -> None:
     )
     lidar.connect()
 
-    # LKA for lane keeping
-    lka_pipeline = LKAPipeline(
-        simulator=sim, controller=controller, camera=camera,
+    perception = PerceptionPipeline(
+        camera=camera,
+        lidar=lidar,
         lane_detector=LaneDetector(),
-        lane_keeper=LaneKeeper(kp=0.5, default_speed=args.speed),
-        loop_hz=10.0,
     )
 
-    # AEB overrides LKA when obstacle detected
-    aeb_pipeline = AEBPipeline(
+    # A single pipeline arbitrates commands so AEB always overrides LKA.
+    pipeline = ADASPipeline(
         controller=controller,
+        perception=perception,
+        lane_keeper=LaneKeeper(kp=0.5, default_speed=args.speed),
         aeb_controller=AEBController(),
-        lidar=lidar,
-        current_speed_fn=lambda: args.speed,
+        default_speed=args.speed,
         loop_hz=20.0,
+        enable_lka=True,
+        enable_aeb=True,
     )
+    aeb_active_steps = 0
+    minimum_distance = float("inf")
+
+    def record_step(result: object) -> None:
+        nonlocal aeb_active_steps, minimum_distance
+        if pipeline.is_aeb_active:
+            aeb_active_steps += 1
+        distance = getattr(result, "min_forward_distance", float("inf"))
+        minimum_distance = min(minimum_distance, distance)
+
+    pipeline.add_step_callback(record_step)
 
     # Wait for sensors
     for _ in range(50):
@@ -90,23 +102,16 @@ def main() -> None:
         time.sleep(0.1)
 
     print(f"[AEB] Starting LKA + AEB pipelines (speed={args.speed} m/s)")
-    lka_pipeline.start()
-    aeb_pipeline.start()
+    pipeline.start()
 
     time.sleep(args.duration)
 
-    aeb_pipeline.stop()
-    lka_pipeline.stop()
+    pipeline.stop()
 
-    print(f"\n[AEB] === Results ===")
-    print(f"  AEB steps: {aeb_pipeline.step_count}")
-    print(f"  Brake activations: {aeb_pipeline.brake_count}")
-    d = aeb_pipeline.last_decision
-    if d:
-        print(f"  Last decision: brake={d.should_brake}, "
-              f"dist={d.min_obstacle_distance:.2f}m, "
-              f"TTC={d.time_to_collision:.2f}s")
-    print(f"  LKA steps: {lka_pipeline.step_count}")
+    print("\n[AEB] === Results ===")
+    print(f"  Perception/control steps: {pipeline.step_count}")
+    print(f"  AEB active steps: {aeb_active_steps}")
+    print(f"  Minimum forward distance: {minimum_distance:.2f}m")
 
     controller.stop()
     lidar.disconnect()

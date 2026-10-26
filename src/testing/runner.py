@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from control import GazeboAckermannController
-from simulation import GazeboSimulator
-from testing.report import ScenarioResult
+from simulation import GazeboSimulator, GazeboVehicleTelemetry
+from testing.adas_runtime import GazeboADASRuntime
+from testing.config_loader import build_assertions
+from testing.report import AssertionResult, ScenarioResult
 from testing.scenario import ScenarioConfig
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,8 @@ class GazeboScenarioRunner(ScenarioRunner):
         self._gui_process: subprocess.Popen[bytes] | None = None
         self._simulator: GazeboSimulator | None = None
         self._controller: GazeboAckermannController | None = None
+        self._telemetry: GazeboVehicleTelemetry | None = None
+        self._adas_runtime: GazeboADASRuntime | None = None
         self._config: ScenarioConfig | None = None
 
     def _start_gazebo_server(self, world_path: str) -> None:
@@ -69,8 +73,8 @@ class GazeboScenarioRunner(ScenarioRunner):
 
         self._server_process = subprocess.Popen(
             ["gz", "sim", "-s", world_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
             env=env,
         )
         logger.info("Started Gazebo server for %s", world_path)
@@ -78,8 +82,8 @@ class GazeboScenarioRunner(ScenarioRunner):
     def _start_gazebo_gui(self) -> None:
         self._gui_process = subprocess.Popen(
             ["gz", "sim", "-g"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
         )
         logger.info("Started Gazebo GUI")
 
@@ -116,6 +120,8 @@ class GazeboScenarioRunner(ScenarioRunner):
     def load_scenario(self, config: ScenarioConfig) -> None:
         self._config = config
         world_path = str(self._scenarios_dir / "worlds" / f"{config.world}.sdf")
+        if not Path(world_path).is_file():
+            raise FileNotFoundError(f"Scenario world not found: {world_path}")
         self._start_gazebo_server(world_path)
 
         if not self._headless:
@@ -134,7 +140,41 @@ class GazeboScenarioRunner(ScenarioRunner):
         )
         self._controller.connect()
 
-        self._unpause_world(config.world)
+        self._telemetry = GazeboVehicleTelemetry(
+            simulator=self._simulator,
+            world_name=config.world,
+            model_name=config.model_name,
+            lane_center_y=config.telemetry.lane_center_y,
+            odometry_topic=config.telemetry.odometry_topic,
+            contact_topic=config.telemetry.contact_topic,
+        )
+        self._telemetry.start()
+
+        if not self._unpause_world(config.world):
+            raise RuntimeError(f"Failed to unpause Gazebo world: {config.world}")
+        if not self._telemetry.wait_for_odometry(
+            config.telemetry.startup_timeout
+        ):
+            raise RuntimeError(
+                "No Gazebo odometry received from "
+                f"{self._telemetry.odometry_topic}"
+            )
+
+        if config.sut.mode != "open_loop":
+            self._adas_runtime = GazeboADASRuntime(
+                simulator=self._simulator,
+                controller=self._controller,
+                world_name=config.world,
+                model_name=config.model_name,
+                config=config.sut,
+            )
+            self._adas_runtime.connect()
+            if not self._adas_runtime.wait_for_sensors(
+                config.telemetry.startup_timeout
+            ):
+                raise RuntimeError(
+                    f"Required sensors did not become ready for {config.sut.mode}"
+                )
         logger.info("Scenario '%s' loaded and running", config.name)
 
     def execute(self) -> ScenarioResult:
@@ -142,62 +182,122 @@ class GazeboScenarioRunner(ScenarioRunner):
             raise RuntimeError("No scenario loaded. Call load_scenario() first.")
 
         config = self._config
-        metrics: dict[str, Any] = {}
         start_time = time.monotonic()
 
         try:
-            for action in config.actions:
-                elapsed = time.monotonic() - start_time
-                if elapsed > config.timeout:
-                    return ScenarioResult(
-                        scenario_name=config.name,
-                        passed=False,
-                        duration=elapsed,
-                        metrics=metrics,
-                        error="Scenario timed out",
-                    )
-                self._execute_action(action, metrics)
+            if config.sut.mode == "open_loop":
+                for action in config.actions:
+                    self._execute_action(action, start_time)
+            else:
+                assert self._adas_runtime is not None
+                self._adas_runtime.start()
+                self._wait_for_action(config.sut.duration, start_time)
+                self._adas_runtime.stop()
+
+            self._controller.stop()
+            time.sleep(max(config.telemetry.sample_interval, 0.25))
 
             duration = time.monotonic() - start_time
+            metrics = self._snapshot_metrics()
+            assertion_results = self._evaluate_assertions(metrics)
+            failures = [
+                result.reason
+                for result in assertion_results
+                if not result.passed
+            ]
             return ScenarioResult(
                 scenario_name=config.name,
-                passed=True,
+                passed=not failures,
                 duration=duration,
                 metrics=metrics,
+                assertions=assertion_results,
+                error="; ".join(failures) or None,
             )
-        except Exception as exc:
+        except TimeoutError as exc:
+            self._stop_adas_runtime()
             duration = time.monotonic() - start_time
             return ScenarioResult(
                 scenario_name=config.name,
                 passed=False,
                 duration=duration,
-                metrics=metrics,
+                metrics=self._snapshot_metrics(),
+                error=str(exc),
+            )
+        except Exception as exc:
+            self._stop_adas_runtime()
+            duration = time.monotonic() - start_time
+            return ScenarioResult(
+                scenario_name=config.name,
+                passed=False,
+                duration=duration,
+                metrics=self._snapshot_metrics(),
                 error=str(exc),
             )
 
-    def _execute_action(
-        self, action: Any, metrics: dict[str, Any]
-    ) -> None:
+    def _execute_action(self, action: Any, start_time: float) -> None:
         assert self._controller is not None
         if action.action_type == "drive":
             speed = action.params.get("speed", 0.0)
             steering = action.params.get("steering_angle", 0.0)
             self._controller.send_command(speed=speed, steering_angle=steering)
-            if action.duration > 0:
-                time.sleep(action.duration)
+            self._wait_for_action(action.duration, start_time)
         elif action.action_type == "stop":
             self._controller.stop()
-            if action.duration > 0:
-                time.sleep(action.duration)
+            self._wait_for_action(action.duration, start_time)
         elif action.action_type == "wait":
-            time.sleep(action.duration)
+            self._wait_for_action(action.duration, start_time)
         else:
-            logger.warning("Unknown action type: %s", action.action_type)
+            raise ValueError(f"Unknown action type: {action.action_type}")
+
+    def _wait_for_action(self, duration: float, start_time: float) -> None:
+        assert self._config is not None
+        deadline = time.monotonic() + max(duration, 0.0)
+        while time.monotonic() < deadline:
+            elapsed = time.monotonic() - start_time
+            if elapsed > self._config.timeout:
+                raise TimeoutError(
+                    f"Scenario timed out after {elapsed:.2f}s"
+                )
+            remaining = deadline - time.monotonic()
+            time.sleep(
+                min(self._config.telemetry.sample_interval, remaining)
+            )
+
+    def _snapshot_metrics(self) -> dict[str, Any]:
+        metrics = self._telemetry.snapshot() if self._telemetry else {}
+        if self._adas_runtime is not None:
+            metrics.update(self._adas_runtime.metrics())
+        return metrics
+
+    def _evaluate_assertions(
+        self, metrics: dict[str, Any]
+    ) -> list[AssertionResult]:
+        assert self._config is not None
+        results: list[AssertionResult] = []
+        for assertion in build_assertions(self._config.pass_conditions):
+            passed, reason = assertion.evaluate(metrics)
+            results.append(
+                AssertionResult(
+                    name=type(assertion).__name__,
+                    passed=passed,
+                    reason=reason,
+                )
+            )
+        return results
 
     def teardown(self) -> None:
+        self._stop_adas_runtime()
+        if self._adas_runtime is not None:
+            self._adas_runtime.disconnect()
+            self._adas_runtime = None
         if self._controller is not None:
+            try:
+                self._controller.stop()
+            except RuntimeError:
+                logger.debug("Controller was already disconnected")
             self._controller.disconnect()
             self._controller = None
+        self._telemetry = None
         if self._simulator is not None:
             self._simulator.disconnect()
             self._simulator = None
@@ -216,3 +316,7 @@ class GazeboScenarioRunner(ScenarioRunner):
                 self._gui_process.kill()
             self._gui_process = None
         logger.info("Scenario runner torn down")
+
+    def _stop_adas_runtime(self) -> None:
+        if self._adas_runtime is not None:
+            self._adas_runtime.stop()

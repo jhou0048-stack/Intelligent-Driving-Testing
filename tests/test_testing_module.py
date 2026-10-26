@@ -5,8 +5,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing import (
+    AEBTriggeredAssertion,
+    FinalSpeedBelowAssertion,
     GazeboScenarioRunner,
     MaxLateralDeviationAssertion,
+    MinimumDistanceTraveledAssertion,
+    MinimumPerceptionStepsAssertion,
     NoCollisionAssertion,
     PositionWithinAssertion,
     ScenarioAction,
@@ -14,6 +18,8 @@ from testing import (
     ScenarioConfig,
     ScenarioResult,
     ScenarioRunner,
+    ScenarioSUTConfig,
+    ScenarioTelemetryConfig,
     TestReport,
 )
 
@@ -48,6 +54,8 @@ def test_scenario_config_defaults() -> None:
     assert config.model_name == "ego_vehicle"
     assert config.actions == []
     assert config.pass_conditions == []
+    assert config.telemetry == ScenarioTelemetryConfig()
+    assert config.sut == ScenarioSUTConfig()
     assert config.timeout == 60.0
 
 
@@ -115,6 +123,38 @@ def test_no_collision_fail() -> None:
     assert "3" in reason
 
 
+@pytest.mark.parametrize(
+    ("assertion", "expected"),
+    [
+        (PositionWithinAssertion(), "position"),
+        (MaxLateralDeviationAssertion(), "lateral"),
+        (NoCollisionAssertion(), "collision"),
+    ],
+)
+def test_assertions_fail_when_metric_is_missing(
+    assertion: ScenarioAssertion, expected: str
+) -> None:
+    ok, reason = assertion.evaluate({})
+    assert ok is False
+    assert expected in reason.lower()
+
+
+@pytest.mark.parametrize(
+    ("assertion", "metrics"),
+    [
+        (MinimumDistanceTraveledAssertion(2.0), {"distance_traveled": 2.1}),
+        (FinalSpeedBelowAssertion(0.2), {"final_speed": 0.1}),
+        (AEBTriggeredAssertion(), {"aeb_triggered": True}),
+        (MinimumPerceptionStepsAssertion(10), {"perception_steps": 10}),
+    ],
+)
+def test_runtime_assertions_pass(
+    assertion: ScenarioAssertion, metrics: dict[str, object]
+) -> None:
+    ok, _reason = assertion.evaluate(metrics)
+    assert ok is True
+
+
 # --- TestReport tests ---------------------------------------------------------
 
 
@@ -157,6 +197,20 @@ def test_report_to_csv(tmp_path: object) -> None:
     assert "True" in content
 
 
+def test_report_to_json(tmp_path: object) -> None:
+    import json
+    import pathlib
+
+    assert isinstance(tmp_path, pathlib.Path)
+    json_path = tmp_path / "nested" / "report.json"
+    report = TestReport()
+    report.add_result(ScenarioResult("s1", True, 1.0))
+    report.to_json(str(json_path))
+    payload = json.loads(json_path.read_text())
+    assert payload["summary"]["passed"] == 1
+    assert payload["results"][0]["scenario_name"] == "s1"
+
+
 # --- GazeboScenarioRunner tests (mocked subprocess) --------------------------
 
 
@@ -190,6 +244,7 @@ def test_gazebo_runner_headless_skips_gui() -> None:
         patch.object(runner, "_wait_for_ready", return_value=True),
         patch("testing.runner.GazeboSimulator") as MockSim,
         patch("testing.runner.GazeboAckermannController") as MockCtrl,
+        patch("testing.runner.GazeboVehicleTelemetry") as MockTelemetry,
         patch.object(runner, "_unpause_world", return_value=True),
     ):
         mock_proc = MagicMock()
@@ -198,6 +253,7 @@ def test_gazebo_runner_headless_skips_gui() -> None:
         MockSim.return_value = mock_sim
         mock_ctrl = MagicMock()
         MockCtrl.return_value = mock_ctrl
+        MockTelemetry.return_value.wait_for_odometry.return_value = True
 
         runner.load_scenario(config)
 
@@ -227,6 +283,48 @@ def test_gazebo_runner_execute_requires_loaded_scenario() -> None:
     runner = GazeboScenarioRunner()
     with pytest.raises(RuntimeError, match="No scenario loaded"):
         runner.execute()
+
+
+def test_gazebo_runner_evaluates_assertions() -> None:
+    runner = GazeboScenarioRunner()
+    runner._config = ScenarioConfig(
+        name="test",
+        world="simple_road",
+        pass_conditions=[
+            {"type": "max_lateral_deviation", "max_deviation": 0.5},
+            {"type": "no_collision"},
+        ],
+    )
+    runner._controller = MagicMock()
+    runner._telemetry = MagicMock()
+    runner._telemetry.snapshot.return_value = {
+        "max_lateral_deviation": 0.2,
+        "collision_count": 0,
+    }
+
+    result = runner.execute()
+
+    assert result.passed is True
+    assert len(result.assertions) == 2
+    assert all(outcome.passed for outcome in result.assertions)
+
+
+def test_gazebo_runner_fails_failed_assertion() -> None:
+    runner = GazeboScenarioRunner()
+    runner._config = ScenarioConfig(
+        name="test",
+        world="simple_road",
+        pass_conditions=[{"type": "no_collision"}],
+    )
+    runner._controller = MagicMock()
+    runner._telemetry = MagicMock()
+    runner._telemetry.snapshot.return_value = {"collision_count": 1}
+
+    result = runner.execute()
+
+    assert result.passed is False
+    assert result.error is not None
+    assert "collision" in result.error.lower()
 
 
 def test_gazebo_runner_context_manager() -> None:

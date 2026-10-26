@@ -10,7 +10,9 @@
     <pose>0 0 0 0 0 0</pose>
 
     <link name="chassis">
-      <pose>0 0 0.1 0 0 0</pose>
+      <!-- Keep the chassis above the road so contact events represent
+           obstacles rather than continuous road penetration. -->
+      <pose>0 0 0.2 0 0 0</pose>
       <inertial>
         <mass>5.0</mass>
         <inertia>
@@ -41,6 +43,13 @@
           </box>
         </geometry>
       </collision>
+      <sensor name="chassis_contact" type="contact">
+        <always_on>true</always_on>
+        <update_rate>50</update_rate>
+        <contact>
+          <collision>collision</collision>
+        </contact>
+      </sensor>
     </link>
 
     <link name="front_left_wheel">
