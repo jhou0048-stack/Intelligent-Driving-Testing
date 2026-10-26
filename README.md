@@ -52,8 +52,7 @@ Detailed boundaries and data flow are documented in
 
 ```text
 .
-├── .github/workflows/      # GitHub Actions unit-test workflow
-├── config/                 # Scenarios and regression limits
+├── config/                 # Scenarios, regression limits, and CI template
 ├── scenarios/
 │   ├── models/             # Ego, obstacle, and pedestrian SDF models
 │   └── worlds/             # Road and hazard test worlds
@@ -203,9 +202,11 @@ Latest local verification:
 5/5 Gazebo validation scenarios passed
 ```
 
-Unit tests run automatically through GitHub Actions. Gazebo end-to-end tests are
-kept as a local validation stage because they require the simulator, rendering,
-and native transport bindings.
+A GitHub Actions template is included at
+`config/github-actions-unit-tests.yml`. Copy it to
+`.github/workflows/unit-tests.yml` after granting the pushing credential the
+GitHub `workflow` permission. Gazebo end-to-end tests remain a local validation
+stage because they require the simulator, rendering, and native bindings.
 
 ## Scope
 
